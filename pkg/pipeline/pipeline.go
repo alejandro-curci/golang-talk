@@ -1,6 +1,9 @@
 package pipeline
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 // A pipeline is a series of stages connected by channels,
 // where each stage is a group of goroutines running the same function.
@@ -53,9 +56,55 @@ func sum(in <-chan int) <-chan int {
 
 // main client, it consumes the numbers coming from a pipeline (printing to console)
 func main() {
-	for n := range power(generate(2, 9, 17, 20, 5, 31)) {
+
+	// before
+	c := generate(2, 9, 17, 20, 5, 31)
+	for n := range power(c) {
 		fmt.Println(n)
 	}
 
-	fmt.Println(<-sum(power(power(generate(1, 7, 92, 45)))))
+	// fan-out/fan-in
+	in := generate(2, 9, 17, 20, 5, 31)
+	// distribute the power() work across three goroutines (reading from the same channel in)
+	ch1 := power(in)
+	ch2 := power(in)
+	ch3 := power(in)
+
+	for n := range merge(ch1, ch2, ch3) {
+		fmt.Println(n)
+	}
+}
+
+// FAN-OUT
+// Multiple functions can read from the same channel until that channel is closed.
+// It provides a way to distribute work amongst a group of workers to parallelize CPU use and I/O.
+
+// FAN-IN
+// A function can read from multiple inputs and proceed until all are closed by multiplexing
+// the input channels onto a single channel that’s closed when all the inputs are closed.
+
+func merge(channels ...<-chan int) <-chan int {
+	var wg sync.WaitGroup
+	out := make(chan int)
+
+	// closure -> sends values from channels into the out channel
+	send := func(ch <-chan int) {
+		for n := range ch {
+			out <- n
+		}
+		wg.Done()
+	}
+
+	wg.Add(len(channels))
+	for _, ch := range channels {
+		go send(ch)
+	}
+
+	// wait and close the out channel in a different goroutine
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
 }
