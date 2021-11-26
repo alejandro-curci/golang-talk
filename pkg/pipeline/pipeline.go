@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
@@ -17,14 +18,14 @@ import (
 // last stage -> sink or consumer
 
 // generate is the first stage, it converts a list of integers into a channel which emits those numbers
-func generate(done <-chan struct{}, numbers ...int) <-chan int {
+func generate(ctx context.Context, numbers ...int) <-chan int {
 	out := make(chan int)
 	go func() {
 		defer close(out) // DEFER CLOSING
 		for _, n := range numbers {
 			select { // SELECT STATEMENT
 			case out <- n:
-			case <-done:
+			case <-ctx.Done(): // LISTEN TO CONTEXT CHANNEL
 				return // EARLY RETURN
 			}
 		}
@@ -33,14 +34,14 @@ func generate(done <-chan struct{}, numbers ...int) <-chan int {
 }
 
 // power is the second stage, it powers the numbers received from stage 1 and sends them to another channel
-func power(done <-chan struct{}, in <-chan int) <-chan int {
+func power(ctx context.Context, in <-chan int) <-chan int {
 	out := make(chan int)
 	go func() {
 		defer close(out) // DEFER CLOSING
 		for n := range in {
 			select { // ADD SELECT STATEMENT
 			case out <- n * n:
-			case <-done:
+			case <-ctx.Done(): // LISTEN TO CONTEXT CHANNEL
 				return // EARLY RETURN
 			}
 		}
@@ -70,7 +71,7 @@ func sum(in <-chan int) <-chan int {
 // A function can read from multiple inputs and proceed until all are closed by multiplexing
 // the input channels onto a single channel that’s closed when all the inputs are closed.
 
-func merge(done <-chan struct{}, channels ...<-chan int) <-chan int {
+func merge(ctx context.Context, channels ...<-chan int) <-chan int {
 	var wg sync.WaitGroup
 	out := make(chan int)
 
@@ -80,7 +81,7 @@ func merge(done <-chan struct{}, channels ...<-chan int) <-chan int {
 		for n := range ch {
 			select { // SELECT STATEMENT
 			case out <- n:
-			case <-done:
+			case <-ctx.Done(): // LISTEN TO CONTEXT CHANNEL
 				return // EARLY RETURN
 			}
 		}
@@ -113,17 +114,20 @@ func merge(done <-chan struct{}, channels ...<-chan int) <-chan int {
 // Remember!!!! => a receive operation on a closed channel can always proceed immediately,
 // yielding the element type’s zero value
 
+// 3) USE CONTEXT PACKAGE INSTEAD OF THE DONE CHANNEL
+// same functionality, more elegant
+
 func main() {
-	// set up a done channel to every stage of the pipeline
-	done := make(chan struct{})
-	defer close(done) // DEFER CLOSING
+	ctx := context.Background()            // CREATE A CONTEXT
+	ctx, cancel := context.WithCancel(ctx) // CANCEL FUNCTIONALITY
+	defer cancel() // DEFER CANCELLATION
 
-	in := generate(done, 15, 2, 9, 23, 91)
+	in := generate(ctx, 15, 2, 9, 23, 91)
 
-	ch1 := power(done, in)
-	ch2 := power(done, in)
+	ch1 := power(ctx, in)
+	ch2 := power(ctx, in)
 
-	out := merge(done, ch1, ch2)
+	out := merge(ctx, ch1, ch2)
 
 	for i := 0; i < 3; i++ {
 		fmt.Println(<-out)
