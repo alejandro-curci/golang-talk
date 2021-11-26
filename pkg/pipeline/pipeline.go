@@ -54,27 +54,6 @@ func sum(in <-chan int) <-chan int {
 	return out
 }
 
-// main client, it consumes the numbers coming from a pipeline (printing to console)
-func main() {
-
-	// before
-	c := generate(2, 9, 17, 20, 5, 31)
-	for n := range power(c) {
-		fmt.Println(n)
-	}
-
-	// fan-out/fan-in
-	in := generate(2, 9, 17, 20, 5, 31)
-	// distribute the power() work across three goroutines (reading from the same channel in)
-	ch1 := power(in)
-	ch2 := power(in)
-	ch3 := power(in)
-
-	for n := range merge(ch1, ch2, ch3) {
-		fmt.Println(n)
-	}
-}
-
 // FAN-OUT
 // Multiple functions can read from the same channel until that channel is closed.
 // It provides a way to distribute work amongst a group of workers to parallelize CPU use and I/O.
@@ -83,16 +62,20 @@ func main() {
 // A function can read from multiple inputs and proceed until all are closed by multiplexing
 // the input channels onto a single channel that’s closed when all the inputs are closed.
 
-func merge(channels ...<-chan int) <-chan int {
+func merge(done <-chan struct{}, channels ...<-chan int) <-chan int {
 	var wg sync.WaitGroup
 	out := make(chan int)
 
 	// closure -> sends values from channels into the out channel
 	send := func(ch <-chan int) {
+		defer wg.Done() // DEFER CLOSING
 		for n := range ch {
-			out <- n
+			select { // SELECT STATEMENT
+			case out <- n:
+			case <-done:
+				return // EARLY RETURN
+			}
 		}
-		wg.Done()
 	}
 
 	wg.Add(len(channels))
@@ -107,4 +90,30 @@ func merge(channels ...<-chan int) <-chan int {
 	}()
 
 	return out
+}
+
+// CANCELLATION
+// In real pipelines, stages don’t always receive all the inbound values (no need to wait for them or an error occurred).
+// If a stage fails to consume all the inbound values, the goroutines attempting to send those values will block indefinitely,
+// causing a resource leak (goroutines are not garbage collected, they must exit on their own)
+// We need to provide a way for downstream stages to indicate to the senders that they will stop accepting input.
+
+// 1) USING EMPTY STRUCT TO MANUALLY SIGNAL THE CANCELLATION
+// problem = each downstream receiver needs to know the number of potentially blocked upstream senders
+
+func main() {
+	in := generate(15, 2, 9, 23, 91)
+
+	ch1 := power(in)
+	ch2 := power(in)
+
+	done := make(chan struct{}, 2) // BUFFERED DONE CHANNEL
+	out := merge(done, ch1, ch2)
+
+	for i := 0; i < 3; i++ {
+		fmt.Println(<-out)
+	}
+
+	done <- struct{}{} // SEND A SIGNAL FOR EACH BLOCKING GOROUTINE
+	done <- struct{}{}
 }
