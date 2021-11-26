@@ -17,25 +17,33 @@ import (
 // last stage -> sink or consumer
 
 // generate is the first stage, it converts a list of integers into a channel which emits those numbers
-func generate(numbers ...int) <-chan int {
+func generate(done <-chan struct{}, numbers ...int) <-chan int {
 	out := make(chan int)
 	go func() {
+		defer close(out) // DEFER CLOSING
 		for _, n := range numbers {
-			out <- n
+			select { // SELECT STATEMENT
+			case out <- n:
+			case <-done:
+				return // EARLY RETURN
+			}
 		}
-		close(out)
 	}()
 	return out
 }
 
 // power is the second stage, it powers the numbers received from stage 1 and sends them to another channel
-func power(in <-chan int) <-chan int {
+func power(done <-chan struct{}, in <-chan int) <-chan int {
 	out := make(chan int)
 	go func() {
+		defer close(out) // DEFER CLOSING
 		for n := range in {
-			out <- n * n
+			select { // ADD SELECT STATEMENT
+			case out <- n * n:
+			case <-done:
+				return // EARLY RETURN
+			}
 		}
-		close(out)
 	}()
 	return out
 }
@@ -101,19 +109,23 @@ func merge(done <-chan struct{}, channels ...<-chan int) <-chan int {
 // 1) USING EMPTY STRUCT TO MANUALLY SIGNAL THE CANCELLATION
 // problem = each downstream receiver needs to know the number of potentially blocked upstream senders
 
+// 2) CLOSING THE CHANNEL
+// Remember!!!! => a receive operation on a closed channel can always proceed immediately,
+// yielding the element type’s zero value
+
 func main() {
-	in := generate(15, 2, 9, 23, 91)
+	// set up a done channel to every stage of the pipeline
+	done := make(chan struct{})
+	defer close(done) // DEFER CLOSING
 
-	ch1 := power(in)
-	ch2 := power(in)
+	in := generate(done, 15, 2, 9, 23, 91)
 
-	done := make(chan struct{}, 2) // BUFFERED DONE CHANNEL
+	ch1 := power(done, in)
+	ch2 := power(done, in)
+
 	out := merge(done, ch1, ch2)
 
 	for i := 0; i < 3; i++ {
 		fmt.Println(<-out)
 	}
-
-	done <- struct{}{} // SEND A SIGNAL FOR EACH BLOCKING GOROUTINE
-	done <- struct{}{}
 }
