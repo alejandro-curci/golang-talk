@@ -14,7 +14,7 @@ func summary() {
 	_ = make(chan int, 3) // buffered with capacity of 3
 
 	// channels are blocking
-	// a send to a full channel will wait until it is blocked
+	// a send to a full channel will wait until one item is read from it
 	// a read from an empty channel will wait until one item is placed in it
 	go func() {
 		ch <- 17 // send to a channel

@@ -18,13 +18,13 @@ func main() {
 		cancel()
 	}()
 
-	mySleepAndTalk(ctx, 5*time.Second, "Some stuff here...")
+	mySleepAndTalk(ctx, 5*time.Second, "PRINTING STUFF HERE...")
 }
 
 func mySleepAndTalk(ctx context.Context, d time.Duration, msg string) {
 	select {
 	case <-ctx.Done():
-		fmt.Println(ctx.Err())
+		fmt.Println("ERROR: ", ctx.Err())
 	case <-time.After(d):
 		fmt.Println(msg)
 	}
